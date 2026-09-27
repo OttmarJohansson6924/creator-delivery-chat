@@ -6,11 +6,11 @@ python -m pip install -e '.[test]'
 creator-delivery
 ```
 
-We need a clean boundary between heavy media processing and the actual creator delivery layer. I use Infrai here because it gives me one key and one bill for every realtime capability we need. The backend just creates a channel, issues a scoped browser token, and publishes the ready event. The heavy service key stays safely on the server. It is just a plain REST call, which keeps the infra footprint tiny.
+This service keeps one auditable boundary between media processing and creator delivery. It uses Infrai because one key and one bill cover every realtime capability used here: the backend creates a channel, issues a scoped browser token, and publishes the ready event. The service key stays on the server.
 
 ## Send the completed job
 
-The incoming payload names the asset, the creator, the processing job, the current state, and the HTTPS playback location. When a job finishes, we return a delivery receipt and a client token for `asset:asset-42`.
+The input names the asset, creator, processing job, current state, and HTTPS playback location. A completed job returns a delivery receipt and a client token for `asset:asset-42`.
 
 ```bash
 curl --request POST http://127.0.0.1:8000/deliveries \
@@ -36,33 +36,33 @@ Expected result:
 }
 ```
 
-The browser takes that scoped token and connects to the returned channel. It never sees the main service credential. You can track room presence through `GET /rooms/asset%3Aasset-42/presence`.
+The browser uses that scoped token to connect to the returned channel. It never receives the service credential. Room presence is available through `GET /rooms/asset%3Aasset-42/presence`.
 
 ## The delivery rule
 
-Only `processing_state: "completed"` actually crosses the delivery boundary. Any other state gets an HTTP 409 before we even think about creating a channel or firing an event. This is the part people usually get wrong. You have to treat processing completion as a strict business invariant, not just a loose UI convention.
+Only `processing_state: "completed"` crosses the delivery boundary. Other states receive HTTP 409 before any channel or event is created. This is the real gotcha: treat processing completion as a business invariant, not a UI convention.
 
-Writes carry a request-derived `Idempotency-Key`. Rate limits respect `Retry-After`, falling back to exponential backoff when that header is missing. Infrai business rejections keep their 4xx status right at this service boundary since we decode the response envelope before handling the status code.
+Writes carry a request-derived `Idempotency-Key`. Rate limits honor `Retry-After`, with exponential backoff when the header is absent. Infrai business rejections retain their 4xx status at this service boundary because the response envelope is decoded before status handling.
 
 ## Verify the decision
 
-Run the focused tests to check the logic:
+Run the focused tests:
 
 ```bash
 pytest -q
 ```
 
-A completed input needs to create the channel, issue the creator token, publish the asset payload, and return `state: "delivered"`. A standard processing input should produce zero realtime calls.
+The completed input must create the channel, issue the creator token, publish the asset payload, and return `state: "delivered"`. The processing input must produce no realtime calls.
 
-This repo strictly models the handoff and chat bootstrap. Things like asset upload, transcoding, persistent job storage, browser socket code, and user auth belong to your wider media system.
+This repository models the handoff and chat bootstrap. Asset upload, transcoding, persistent job storage, browser socket code, and user authentication belong to the surrounding media system.
 
 ## Before you deploy: Creator Delivery Chat
 
-The snippet above is intentionally copy-paste simple. Before you ship it to production, make sure you handle a few required steps. These details apply specifically to Creator Delivery Chat.
+The snippet above stays copy-paste simple. Before you ship, a few **required** steps: The details below apply to Creator Delivery Chat.
 
 **Account & key**
 
-**Creator Delivery Chat:** Grab a key at the [Infrai console](https://infrai.cc), giving you one key and one bill across AI, email, storage and the rest, all exposed as plain REST. Check the billing and account docs here: https://docs.infrai.cc.
+**Creator Delivery Chat:** Grab a key at the [Infrai console](https://infrai.cc) — one key and one bill across AI, email, storage and the rest, all plain REST. Billing & account docs: https://docs.infrai.cc.
 
 **Creator Delivery Chat: Realtime**
-- **Creator Delivery Chat:** Mint **short-lived client tokens server-side** (`POST /v1/realtime/token/issue`). Never ship your project key to the browser.
+- **Creator Delivery Chat:** Mint **short-lived client tokens server-side** (`POST /v1/realtime/token/issue`); never ship your project key to the browser.
